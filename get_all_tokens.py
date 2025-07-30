@@ -82,21 +82,15 @@ class TokenCollector:
 def main():
     """Main function to collect and export merged tokens"""
     collector = TokenCollector()
-    
-    print("🚀 Collecting tokens from all exchanges...")
-    
+        
     # Get all merged tokens
     merged_tokens = collector.get_all_merged_tokens()
-    
-    print(f"\n📊 Found {len(merged_tokens)} unique tokens across all exchanges")
     
     # Save to JSON
     filename = collector.save_to_json(merged_tokens)
     
-    print(f"\n✅ Merged tokens exported to: {filename}")
+    print(f" Merged tokens exported to: {filename}")
     
-    # Show first 50 tokens as preview
-    print(f"\n🔥 First 50 tokens:")
     for i, token in enumerate(merged_tokens[:50], 1):
         print(f"  {i:2d}. {token}")
     

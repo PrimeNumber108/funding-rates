@@ -29,55 +29,27 @@ class FundingRateCollector:
         for exchange_name, exchange in self.exchanges.items():
             exchange.set_sandbox_mode(False)  # Set to True for testnet
     
-    def get_perpetual_symbol(self, exchange_name: str, base_symbol: str) -> List[str]:
-        """Get possible perpetual symbol formats for each exchange"""
-        symbol_formats = {
-            'bitget': [
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'huobi': [
-                f"{base_symbol}-USDT",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'bybit': [
-                f"{base_symbol}USDT",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'bingx': [
-                f"{base_symbol}-USDT",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'gateio': [
-                f"{base_symbol}_USDT",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'okx': [
-                f"{base_symbol}-USDT-SWAP",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ],
-            'mexc': [
-                f"{base_symbol}_USDT",
-                f"{base_symbol}/USDT:USDT",
-                f"{base_symbol}/USDT"
-            ]
+    def get_perpetual_symbol(self, exchange_name: str, base_symbol: str) -> str:
+        """Get perpetual symbol format for each exchange (hard-coded)"""
+        symbol_mapping = {
+            'bitget': f"{base_symbol}USDT",        # Bitget uses BTCUSDT
+            'huobi': f"{base_symbol}-USDT",        # Huobi uses BTC-USDT
+            'kucoin': f"{base_symbol}USDTM",       # KuCoin uses BTCUSDTM
+            'bybit': f"{base_symbol}USDT",         # Bybit uses BTCUSDT
+            'bingx': f"{base_symbol}-USDT",        # BingX uses BTC-USDT
+            'gateio': f"{base_symbol}_USDT",       # Gate.io uses BTC_USDT
+            'okx': f"{base_symbol}-USDT-SWAP",     # OKX uses BTC-USDT-SWAP
+            'mexc': f"{base_symbol}_USDT",         # MEXC uses BTC_USDT
+            'binance': f"{base_symbol}USDT"        # Binance uses BTCUSDT
         }
-        return symbol_formats.get(exchange_name, [f"{base_symbol}/USDT"])
+        return symbol_mapping.get(exchange_name, f"{base_symbol}/USDT")
 
     async def get_funding_rate_single_exchange(self, exchange_name: str, symbol: str = 'XCN/USDT') -> Dict[str, Any]:
         """Get funding rate from a single exchange"""
         try:
             exchange = self.exchanges[exchange_name]
             
-            # Load markets if not already loaded
             if not exchange.markets:
-                # Try async first, then sync
                 try:
                     if hasattr(exchange, 'load_markets') and asyncio.iscoroutinefunction(exchange.load_markets):
                         await exchange.load_markets()
@@ -88,27 +60,15 @@ class FundingRateCollector:
             
             # Convert to perpetual symbol for the specific exchange
             base_symbol = symbol.replace('/USDT', '').replace('/USD', '')
-            possible_symbols = self.get_perpetual_symbol(exchange_name, base_symbol)
+            perp_symbol = self.get_perpetual_symbol(exchange_name, base_symbol)
             
-            # Try each possible symbol format
-            funding_rate_info = None
-            used_symbol = None
-            
-            for perp_symbol in possible_symbols:
-                try:
-                    funding_rate_info = exchange.fetch_funding_rate(perp_symbol)
-                    used_symbol = perp_symbol
-                    break
-                except Exception as e:
-                    continue
-            
-            if funding_rate_info is None:
-                raise Exception(f"No valid symbol format found for {base_symbol} on {exchange_name}")
+            # Get funding rate using the hard-coded symbol format
+            funding_rate_info = exchange.fetch_funding_rate(perp_symbol)
             
             return {
                 'exchange': exchange_name,
                 'symbol': symbol,
-                'perpetual_symbol': used_symbol,
+                'perpetual_symbol': perp_symbol,
                 'funding_rate': funding_rate_info.get('fundingRate'),
                 'funding_time': funding_rate_info.get('fundingDatetime'),
                 'next_funding_time': funding_rate_info.get('nextFundingDatetime'),
@@ -120,11 +80,11 @@ class FundingRateCollector:
         except Exception as e:
             logger.error(f"Error getting funding rate from {exchange_name}: {str(e)}")
             base_symbol = symbol.replace('/USDT', '').replace('/USD', '')
-            possible_symbols = self.get_perpetual_symbol(exchange_name, base_symbol)
+            perp_symbol = self.get_perpetual_symbol(exchange_name, base_symbol)
             return {
                 'exchange': exchange_name,
                 'symbol': symbol,
-                'perpetual_symbol': possible_symbols[0] if possible_symbols else 'N/A',
+                'perpetual_symbol': perp_symbol,
                 'funding_rate': None,
                 'funding_time': None,
                 'next_funding_time': None,
@@ -149,11 +109,11 @@ class FundingRateCollector:
             if isinstance(result, Exception):
                 exchange_name = list(self.exchanges.keys())[i]
                 base_symbol = symbol.replace('/USDT', '').replace('/USD', '')
-                possible_symbols = self.get_perpetual_symbol(exchange_name, base_symbol)
+                perp_symbol = self.get_perpetual_symbol(exchange_name, base_symbol)
                 processed_results.append({
                     'exchange': exchange_name,
                     'symbol': symbol,
-                    'perpetual_symbol': possible_symbols[0] if possible_symbols else 'N/A',
+                    'perpetual_symbol': perp_symbol,
                     'funding_rate': None,
                     'funding_time': None,
                     'next_funding_time': None,
@@ -341,17 +301,7 @@ def save_all_tokens_funding_rates_to_json(token_file: str = 'merged_tokens_20250
 
 # Main execution
 if __name__ == "__main__":
-    print("🚀 Starting funding rate collection for ALL tokens from merged_tokens_20250730_161741.json")
-    print("📋 Exchanges: bitget, huobi, bybit, bingx, gateio, okx, mexc")
-    print("-" * 80)
-    
-    # Get funding rates for ALL tokens from JSON file and save to JSON
     filename, results = save_all_tokens_funding_rates_to_json('merged_tokens_20250730_161741.json')
-    
-    # Show detailed results for first 20 tokens
-    print(f"\n🔍 Detailed results for first 20 tokens:")
-    print(f"{'Symbol':<15} {'Successful':<12} {'Failed':<8} {'Exchanges'}")
-    print("-" * 60)
     
     count = 0
     for symbol, exchange_results in results.items():
@@ -369,5 +319,5 @@ if __name__ == "__main__":
     if len(results) > 20:
         print(f"... and {len(results) - 20} more tokens")
     
-    print(f"\n✅ Complete results saved to: {filename}")
-    print("🎉 Funding rate collection completed!")
+    print(f"Complete results saved to: {filename}")
+    print("Funding rate collection completed!")
