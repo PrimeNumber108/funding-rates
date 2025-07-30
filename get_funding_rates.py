@@ -17,7 +17,7 @@ class FundingRateCollector:
         self.exchanges = {
             'bitget': ccxt.bitget({'enableRateLimit': True}),
             'huobi': ccxt.huobi({'enableRateLimit': True}),
-            # 'kucoin': ccxt.kucoin({'enableRateLimit': True}),
+            'kucoin': ccxt.kucoin({'enableRateLimit': True}),
             'bybit': ccxt.bybit({'enableRateLimit': True}),
             'bingx': ccxt.bingx({'enableRateLimit': True}),
             'gateio': ccxt.gateio({'enableRateLimit': True}),
