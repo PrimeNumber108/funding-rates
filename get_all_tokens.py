@@ -2,8 +2,7 @@
 
 import ccxt
 import json
-import asyncio
-from typing import Dict, List, Set
+from typing import List, Set
 from datetime import datetime
 import logging
 
@@ -30,171 +29,81 @@ class TokenCollector:
         for exchange_name, exchange in self.exchanges.items():
             exchange.set_sandbox_mode(False)
     
-    def get_perpetual_symbols_from_exchange(self, exchange_name: str) -> List[str]:
-        """Get all perpetual/swap symbols from a single exchange"""
+    def get_tokens_from_exchange(self, exchange_name: str) -> Set[str]:
+        """Get all base tokens from a single exchange"""
         try:
             exchange = self.exchanges[exchange_name]
             
             # Load markets
             exchange.load_markets()
             
-            perpetual_symbols = []
+            tokens = set()
             
             for symbol, market in exchange.markets.items():
                 # Check if it's a perpetual/swap contract
                 if market.get('type') == 'swap' or market.get('contract') == True:
                     # Extract base symbol (e.g., BTC from BTC/USDT:USDT)
                     base_symbol = market.get('base', '')
-                    if base_symbol and base_symbol not in ['USDT', 'USD', 'BUSD']:
-                        perpetual_symbols.append({
-                            'symbol': symbol,
-                            'base': base_symbol,
-                            'quote': market.get('quote', ''),
-                            'exchange': exchange_name,
-                            'type': market.get('type', ''),
-                            'active': market.get('active', False)
-                        })
+                    if base_symbol and base_symbol not in ['USDT', 'USD', 'BUSD', 'USDC']:
+                        tokens.add(base_symbol)
             
-            logger.info(f"Found {len(perpetual_symbols)} perpetual symbols on {exchange_name}")
-            return perpetual_symbols
+            logger.info(f"Found {len(tokens)} unique tokens on {exchange_name}")
+            return tokens
             
         except Exception as e:
-            logger.error(f"Error getting symbols from {exchange_name}: {str(e)}")
-            return []
+            logger.error(f"Error getting tokens from {exchange_name}: {str(e)}")
+            return set()
     
-    async def get_all_tokens_async(self) -> Dict[str, List[Dict]]:
-        """Get all tokens from all exchanges asynchronously"""
-        results = {}
-        
-        # Create tasks for each exchange
-        tasks = []
-        for exchange_name in self.exchanges.keys():
-            task = asyncio.create_task(
-                asyncio.to_thread(self.get_perpetual_symbols_from_exchange, exchange_name)
-            )
-            tasks.append((exchange_name, task))
-        
-        # Wait for all tasks to complete
-        for exchange_name, task in tasks:
-            try:
-                symbols = await task
-                results[exchange_name] = symbols
-            except Exception as e:
-                logger.error(f"Failed to get symbols from {exchange_name}: {str(e)}")
-                results[exchange_name] = []
-        
-        return results
-    
-    def get_all_tokens_sync(self) -> Dict[str, List[Dict]]:
-        """Get all tokens from all exchanges synchronously"""
-        results = {}
+    def get_all_merged_tokens(self) -> List[str]:
+        """Get all unique tokens merged from all exchanges"""
+        all_tokens = set()
         
         for exchange_name in self.exchanges.keys():
             logger.info(f"Getting tokens from {exchange_name}...")
-            results[exchange_name] = self.get_perpetual_symbols_from_exchange(exchange_name)
+            exchange_tokens = self.get_tokens_from_exchange(exchange_name)
+            all_tokens.update(exchange_tokens)
         
-        return results
-    
-    def merge_tokens(self, exchange_tokens: Dict[str, List[Dict]]) -> List[Dict]:
-        """Merge tokens from all exchanges and remove duplicates"""
-        merged_tokens = []
-        seen_bases = set()
-        
-        # Collect all unique base symbols
-        for exchange_name, tokens in exchange_tokens.items():
-            for token in tokens:
-                base = token['base']
-                if base not in seen_bases:
-                    seen_bases.add(base)
-                    
-                    # Find all exchanges that have this token
-                    exchanges_with_token = []
-                    for ex_name, ex_tokens in exchange_tokens.items():
-                        for ex_token in ex_tokens:
-                            if ex_token['base'] == base:
-                                exchanges_with_token.append({
-                                    'exchange': ex_name,
-                                    'symbol': ex_token['symbol'],
-                                    'active': ex_token['active']
-                                })
-                    
-                    merged_tokens.append({
-                        'base_symbol': base,
-                        'exchanges': exchanges_with_token,
-                        'exchange_count': len(exchanges_with_token)
-                    })
-        
-        # Sort by exchange count (most popular tokens first)
-        merged_tokens.sort(key=lambda x: x['exchange_count'], reverse=True)
-        
+        # Convert to sorted list
+        merged_tokens = sorted(list(all_tokens))
         return merged_tokens
     
-    def get_base_symbols_only(self, exchange_tokens: Dict[str, List[Dict]]) -> List[str]:
-        """Get only unique base symbols (like BTC, ETH, etc.)"""
-        base_symbols = set()
+    def save_to_json(self, tokens: List[str], filename: str = None):
+        """Save tokens list to JSON file"""
+        if filename is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'merged_tokens_{timestamp}.json'
         
-        for exchange_name, tokens in exchange_tokens.items():
-            for token in tokens:
-                base_symbols.add(token['base'])
-        
-        return sorted(list(base_symbols))
-    
-    def save_to_json(self, data, filename: str):
-        """Save data to JSON file"""
         with open(filename, 'w') as f:
-            json.dump(data, f, indent=2, default=str)
-        logger.info(f"Data saved to {filename}")
-    
-    async def close_connections(self):
-        """Close all exchange connections"""
-        for exchange in self.exchanges.values():
-            if hasattr(exchange, 'close'):
-                await exchange.close()
+            json.dump(tokens, f, indent=2)
+        
+        logger.info(f"Merged tokens saved to {filename}")
+        return filename
 
 def main():
-    """Main function to collect and export all tokens"""
+    """Main function to collect and export merged tokens"""
     collector = TokenCollector()
     
-    print("🚀 Starting token collection from all exchanges...")
+    print("🚀 Collecting tokens from all exchanges...")
     
-    # Get all tokens from all exchanges
-    exchange_tokens = collector.get_all_tokens_sync()
+    # Get all merged tokens
+    merged_tokens = collector.get_all_merged_tokens()
     
-    # Print summary
-    print("\n📊 Summary:")
-    total_tokens = 0
-    for exchange_name, tokens in exchange_tokens.items():
-        count = len(tokens)
-        total_tokens += count
-        print(f"  {exchange_name}: {count} tokens")
-    print(f"  Total: {total_tokens} tokens")
+    print(f"\n📊 Found {len(merged_tokens)} unique tokens across all exchanges")
     
-    # Merge tokens
-    merged_tokens = collector.merge_tokens(exchange_tokens)
-    print(f"  Unique base symbols: {len(merged_tokens)}")
+    # Save to JSON
+    filename = collector.save_to_json(merged_tokens)
     
-    # Get base symbols only
-    base_symbols = collector.get_base_symbols_only(exchange_tokens)
+    print(f"\n✅ Merged tokens exported to: {filename}")
     
-    # Generate timestamp for filenames
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Show first 50 tokens as preview
+    print(f"\n🔥 First 50 tokens:")
+    for i, token in enumerate(merged_tokens[:50], 1):
+        print(f"  {i:2d}. {token}")
     
-    # Save all data
-    collector.save_to_json(exchange_tokens, f'exchange_tokens_{timestamp}.json')
-    collector.save_to_json(merged_tokens, f'merged_tokens_{timestamp}.json')
-    collector.save_to_json(base_symbols, f'base_symbols_{timestamp}.json')
+    if len(merged_tokens) > 50:
+        print(f"  ... and {len(merged_tokens) - 50} more tokens")
     
-    print(f"\n✅ Files saved:")
-    print(f"  📄 exchange_tokens_{timestamp}.json - All tokens by exchange")
-    print(f"  📄 merged_tokens_{timestamp}.json - Merged tokens with exchange info")
-    print(f"  📄 base_symbols_{timestamp}.json - Simple list of base symbols")
-    
-    # Show top 20 most popular tokens
-    print(f"\n🔥 Top 20 most popular tokens (by exchange count):")
-    for i, token in enumerate(merged_tokens[:20], 1):
-        print(f"  {i:2d}. {token['base_symbol']:<8} ({token['exchange_count']}/8 exchanges)")
-    
-    return exchange_tokens, merged_tokens, base_symbols
+    return merged_tokens
 
 if __name__ == "__main__":
     main()
