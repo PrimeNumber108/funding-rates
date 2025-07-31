@@ -5,6 +5,7 @@ import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
+import time
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -96,13 +97,16 @@ class FundingRateCollector:
     async def get_funding_rates_all_exchanges(self, symbol: str = 'BTC/USDT') -> List[Dict[str, Any]]:
         """Get funding rates from all configured exchanges"""
         tasks = []
-        
+        start = time.time()
+        print('start: ',start)
         for exchange_name in self.exchanges.keys():
             task = self.get_funding_rate_single_exchange(exchange_name, symbol)
             tasks.append(task)
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+        end = time.time()
+        print('time is: ', end - start)
+
         # Handle any exceptions that occurred
         processed_results = []
         for i, result in enumerate(results):
@@ -127,14 +131,29 @@ class FundingRateCollector:
         return processed_results
     
     async def get_multiple_symbols_funding_rates(self, symbols: List[str]) -> Dict[str, List[Dict[str, Any]]]:
-        """Get funding rates for multiple symbols from all exchanges"""
+        """Get funding rates for multiple symbols from all exchanges concurrently"""
         results = {}
-        
-        for symbol in symbols:
+
+        async def fetch_symbol(symbol):
             logger.info(f"Fetching funding rates for {symbol}")
-            results[symbol] = await self.get_funding_rates_all_exchanges(symbol)
-        
+            return symbol, await self.get_funding_rates_all_exchanges(symbol)
+
+        # Create tasks for all symbols
+        tasks = [fetch_symbol(symbol) for symbol in symbols]
+
+        # Run all tasks concurrently
+        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect results
+        for result in task_results:
+            if isinstance(result, Exception):
+                logger.error(f"Error fetching symbol: {str(result)}")
+            else:
+                symbol, data = result
+                results[symbol] = data
+
         return results
+
     
     def get_successful_rates(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filter only successful funding rate results"""
