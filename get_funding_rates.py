@@ -1,4 +1,4 @@
-import ccxt
+import ccxt.async_support as ccxt
 import asyncio
 import aiohttp
 import json
@@ -33,38 +33,103 @@ class FundingRateCollector:
     def get_perpetual_symbol(self, exchange_name: str, base_symbol: str) -> str:
         """Get perpetual symbol format for each exchange (hard-coded)"""
         symbol_mapping = {
-            'bitget': f"{base_symbol}USDT",        # Bitget uses BTCUSDT
-            'huobi': f"{base_symbol}-USDT",        # Huobi uses BTC-USDT
-            'kucoin': f"{base_symbol}USDTM",       # KuCoin uses BTCUSDTM
-            'bybit': f"{base_symbol}USDT",         # Bybit uses BTCUSDT
-            'bingx': f"{base_symbol}-USDT",        # BingX uses BTC-USDT
-            'gateio': f"{base_symbol}_USDT",       # Gate.io uses BTC_USDT
-            'okx': f"{base_symbol}-USDT-SWAP",     # OKX uses BTC-USDT-SWAP
-            'mexc': f"{base_symbol}_USDT",         # MEXC uses BTC_USDT
-            'binance': f"{base_symbol}USDT"        # Binance uses BTCUSDT
+            'bitget': f"{base_symbol}/USDT:USDT",      # Bitget uses BTC/USDT:USDT for swap contracts
+            'huobi': f"{base_symbol}-USDT",            # Huobi uses BTC-USDT
+            'kucoin': f"{base_symbol}USDTM",           # KuCoin uses BTCUSDTM
+            'bybit': f"{base_symbol}USDT",             # Bybit uses BTCUSDT
+            'bingx': f"{base_symbol}-USDT",            # BingX uses BTC-USDT
+            'gateio': f"{base_symbol}/USDT:USDT",      # Gate.io uses BTC/USDT:USDT for swap contracts
+            'okx': f"{base_symbol}-USDT-SWAP",         # OKX uses BTC-USDT-SWAP
+            'mexc': f"{base_symbol}_USDT",             # MEXC uses BTC_USDT
+            'binance': f"{base_symbol}USDT"            # Binance uses BTCUSDT
         }
         return symbol_mapping.get(exchange_name, f"{base_symbol}/USDT")
+
+    async def get_kucoin_funding_rate(self, symbol: str) -> Dict[str, Any]:
+        """Get funding rate from KuCoin using direct API call"""
+        try:
+            base_symbol = symbol.replace('/USDT', '').replace('/USD', '')
+            perp_symbol = f"{base_symbol}USDTM"  # KuCoin futures symbol format
+            
+            url = f"https://api-futures.kucoin.com/api/v1/funding-rate/{perp_symbol}/current"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('code') == '200000' and data.get('data'):
+                            funding_data = data['data']
+                            funding_rate = float(funding_data.get('value', 0))
+                            
+                            return {
+                                'exchange': 'kucoin',
+                                'symbol': symbol,
+                                'perpetual_symbol': perp_symbol,
+                                'funding_rate': funding_rate,
+                                'funding_time': None, # KuCoin API doesn't provide this in current endpoint
+                                'next_funding_time': None,  # KuCoin API doesn't provide this in current endpoint
+                                'timestamp': funding_data.get('timePoint'),
+                                'success': True,
+                                'error': None
+                            }
+                        else:
+                            return {
+                                'exchange': 'kucoin',
+                                'symbol': symbol,
+                                'perpetual_symbol': perp_symbol,
+                                'funding_rate': None,
+                                'funding_time': None,
+                                'next_funding_time': None,
+                                'timestamp': None,
+                                'success': False,
+                                'error': f"KuCoin API error: {data.get('msg', 'Unknown error')}"
+                            }
+                    else:
+                        return {
+                            'exchange': 'kucoin',
+                            'symbol': symbol,
+                            'perpetual_symbol': perp_symbol,
+                            'funding_rate': None,
+                            'funding_time': None,
+                            'next_funding_time': None,
+                            'timestamp': None,
+                            'success': False,
+                            'error': f"HTTP {response.status}: {await response.text()}"
+                        }
+        except Exception as e:
+            return {
+                'exchange': 'kucoin',
+                'symbol': symbol,
+                'perpetual_symbol': f"{symbol.replace('/USDT', '').replace('/USD', '')}USDTM",
+                'funding_rate': None,
+                'funding_time': None,
+                'next_funding_time': None,
+                'timestamp': None,
+                'success': False,
+                'error': str(e)
+            }
 
     async def get_funding_rate_single_exchange(self, exchange_name: str, symbol: str = 'XCN/USDT') -> Dict[str, Any]:
         """Get funding rate from a single exchange"""
         try:
+            # Handle KuCoin with direct API call
+            if exchange_name == 'kucoin':
+                return await self.get_kucoin_funding_rate(symbol)
+            
             exchange = self.exchanges[exchange_name]
             
             if not exchange.markets:
                 try:
-                    if hasattr(exchange, 'load_markets') and asyncio.iscoroutinefunction(exchange.load_markets):
-                        await exchange.load_markets()
-                    else:
-                        exchange.load_markets()
+                    await exchange.load_markets()
                 except:
-                    exchange.load_markets()
+                    pass
             
             # Convert to perpetual symbol for the specific exchange
             base_symbol = symbol.replace('/USDT', '').replace('/USD', '')
             perp_symbol = self.get_perpetual_symbol(exchange_name, base_symbol)
             
             # Get funding rate using the hard-coded symbol format
-            funding_rate_info = exchange.fetch_funding_rate(perp_symbol)
+            funding_rate_info = await exchange.fetch_funding_rate(perp_symbol)
             
             return {
                 'exchange': exchange_name,
